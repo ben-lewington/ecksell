@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "ecksell-core",
+    "ecksell-ui",
+]
