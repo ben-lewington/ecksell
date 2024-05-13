@@ -55,7 +55,5 @@ int main(void) {
     f->foo = 10,
     f->bar = 20,
     printf("Foobar: %ld\n", f->foo + f->bar);
-    struct Foobar *g = arena_make(&a, struct Foobar);
-    struct Foobar *h = arena_make(&a, struct Foobar);
     return 0;
 }

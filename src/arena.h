@@ -7,8 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifndef ARENA_REGION_DEFAULT_SIZE
-#define ARENA_REGION_DEFAULT_SIZE (8 * 1024);
+#ifndef ARENA_MEM_DEFAULT_SIZE
+#define ARENA_MEM_DEFAULT_SIZE (8 * 1024);
 #endif
 
 typedef struct Mem Mem;
@@ -36,13 +36,13 @@ void  *arena_realloc(Arena *a, void *cur, size_t cur_sz_bytes, size_t new_sz_byt
 void   arena_reset(Arena *a);
 void   arena_free(Arena *a);
 
-size_t arena_snapshot(const Arena *a);
-size_t arena_rollback(Arena *a, size_t snapshot);
+int arena_snapshot(const Arena *a);
+size_t arena_rollback(Arena *a, int snapshot);
 
 void   arena_debug(const Arena *a);
 
 #endif // !ARENA_H
-
+#define ARENA_IMPL
 #ifdef ARENA_IMPL
 
 Mem *__arena_mem_new(size_t cap) {
@@ -61,7 +61,7 @@ void __arena_mem_free(Mem *r) { free(r); }
 
 void *arena_alloc(Arena *a, size_t sz_bytes) {
     // if we need to allocate a new region, the default cap best be big enough.
-    size_t cap = ARENA_REGION_DEFAULT_SIZE;
+    size_t cap = ARENA_MEM_DEFAULT_SIZE;
     if (sz_bytes * sizeof(int8_t)  > cap) cap = sz_bytes;
 
     void *ret = NULL;
@@ -91,7 +91,7 @@ void *arena_alloc(Arena *a, size_t sz_bytes) {
 void *arena_realloc(Arena *a, void *cur, size_t cur_sz_bytes, size_t new_sz_bytes) {
     if (new_sz_bytes <= cur_sz_bytes) return cur;
     void *newp = arena_alloc(a, new_sz_bytes);
-    memcpy(newp, cur, cur_sz_bytes);
+    if (cur != NULL) memcpy(newp, cur, cur_sz_bytes);
     return newp;
 }
 
@@ -111,9 +111,9 @@ void arena_free(Arena *a) {
     a->end = NULL;
 }
 
-size_t arena_snapshot(const Arena *a) {
+int arena_snapshot(const Arena *a) {
     if (a->start == NULL) return -1;
-    size_t ret = 0;
+    int ret = 0;
     Mem *m = a->start;
     ret += m->len;
     while (m->next != NULL) {
@@ -123,13 +123,13 @@ size_t arena_snapshot(const Arena *a) {
     return ret;
 }
 
-size_t arena_rollback(Arena *a, size_t snapshot) {
+size_t arena_rollback(Arena *a, int snapshot) {
     if (snapshot < 0 || a->start == NULL) return -1;
     size_t visited = 0;
     Mem *m = a->start;
     size_t ml = m->len;
     while (m->next != NULL && snapshot >= 0) {
-        if (snapshot <= ml) break;
+        if (snapshot <= (int)ml) break;
 
         visited += ml;
         snapshot -= ml;
@@ -142,10 +142,12 @@ size_t arena_rollback(Arena *a, size_t snapshot) {
         m->len = snapshot;
         cleared = ml - snapshot;
         while (m->next != NULL) {
+            cleared += m->len;
             m->len = 0;
             m = m->next;
         }
     }
+    return cleared;
 }
 
 void arena_debug(const Arena *a) {

@@ -1,10 +1,13 @@
 #ifndef LOG_H
 #define LOG_H
 
-#ifndef __log_impl
+#include <assert.h>
 #include <stdio.h>
-#define __log_impl(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
+
+#ifndef __log_impl
+#define __log_impl(fmt, ...) fprintf(stderr, fmt "\n", __VA_ARGS__)
 #endif // __log_impl
+
 #define LOG_DEBUG 0
 #define LOG_INFO  1
 #define LOG_WARN  2
@@ -20,10 +23,10 @@ typedef enum {
 /// log a value at any log level at runtime
 void log_fmt(LogLevel lvl, char *fmt, ...);
 
-#define __ldebug(fmt, ...) do { __log_impl("[DEBUG]: %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__); } while (0)
-#define __linfo(fmt, ...)  do { __log_impl("[INFO] : %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__); } while (0)
-#define __lwarn(fmt, ...)  do { __log_impl("[WARN] : %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__); } while (0)
-#define __lerror(fmt, ...) do { __log_impl("[ERROR]: %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__); } while (0)
+#define __ldebug(fmt, ...) __log_impl("[DEBUG]: %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__)
+#define __linfo(fmt, ...)  __log_impl("[INFO] : %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__)
+#define __lwarn(fmt, ...)  __log_impl("[WARN] : %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__)
+#define __lerror(fmt, ...) __log_impl("[ERROR]: %s:%d: " fmt "\n", __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__)
 
 #ifndef LOG_LEVEL
     #define log_debug(fmt, ...) __ldebug(fmt, __VA_ARGS__)
@@ -32,24 +35,25 @@ void log_fmt(LogLevel lvl, char *fmt, ...);
     #define log_error(fmt, ...) __lerror(fmt, __VA_ARGS__)
 #else
     #if ((LOG_LEVEL) <= LOG_DEBUG)
-        #define every_debug(fmt, ...) __ldebug(fmt, __VA_ARGS__)
+        #define log_debug(fmt, ...) __ldebug(fmt, __VA_ARGS__)
     #else
         #define every_debug(fmt, ...)
     #endif
     #if ((EVERY_LOG_LEVEL) <= LOG_INFO)
-        #define every_info(fmt, ...)  __linfo(fmt, __VA_ARGS__)
+        #define log_info(fmt, ...)  __linfo(fmt, __VA_ARGS__)
     #else
         #define every_info(fmt, ...)
     #endif
     #if ((EVERY_LOG_LEVEL) <= LOG_WARN) // LOG_WARN
-        #define every_warn(fmt, ...)  __lwarn(fmt, __VA_ARGS__)
+        #define log_warn(fmt, ...)  __lwarn(fmt, __VA_ARGS__)
     #else
         #define every_warn(fmt, ...)
     #endif
+    #define log_error(fmt, ...)     __lerror(fmt, __VA_ARGS__)
 #endif
 #endif // LOG_H
 
-#ifdef LOG_RT_IMPL
+#ifdef LOGGING_IMPL
 /// log a value at any log level at runtime
 void log_fmt(LogLevel lvl, char *fmt, ...) {
     switch (lvl) {
@@ -71,4 +75,4 @@ void log_fmt(LogLevel lvl, char *fmt, ...) {
     va_end(args);
     fprintf(stderr, "\n");
 }
-#endif // LOG_RT_IMPL
+#endif // LOGGING_IMPL
