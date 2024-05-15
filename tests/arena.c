@@ -49,7 +49,7 @@ int main(void) {
     }
     pp[sz] = '\0';
 
-    struct Foobar *f = arena_make(&a, struct Foobar);
+    struct Foobar *f = arena_new(&a, struct Foobar);
     arena_debug(&a);
 
     f->foo = 10,
