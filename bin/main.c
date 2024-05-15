@@ -4,13 +4,16 @@
 
 #define GRID_IMPL
 #include "../src/grid.h"
+#define INPUT_IMPL
+#include "../src/input.h"
 #define LOGGING_IMPL
 #include "../src/logging.h"
 
 #define screen_dims
 
-static GridCfg gcfg = {
-    .grid_items = {
+static AppCfg cfg = {
+    .grid_pad = 5,
+    .grid_item = {
         .x = 50.,
         .y = 20.,
     },
@@ -28,8 +31,6 @@ static Cursor modal_dim = {
 
 int main(void) {
     GridRender gr = {
-        .grid_pad = 5,
-        .grid_items = gcfg.grid_items,
         .window = {
             .top_left = {
                 .x = 50,
@@ -54,30 +55,30 @@ int main(void) {
             .x = GetScreenWidth(),
             .y = GetScreenHeight()
         };
-        Dimensions grid = grid_subRectDims(gr.window, screen);
+        Dimensions grid = grid_windowSize(gr.window, screen);
         Index max = {
-            .x = (int)(grid.x / gr.grid_items.x) - 1,
-            .y = (int)(grid.y / gr.grid_items.y) - 1,
+            .x = (int)(grid.x / cfg.grid_item.x) - 1,
+            .y = (int)(grid.y / cfg.grid_item.y) - 1,
         };
 
         GridMove gm = grid_captureFrameKeys();
 
         // if (!modal) grid_advanceCursor(gm, &gr);
         if (!modal) {
-            const Offset lattice = GRID_SCALE(1.5, gr.grid_items);
+            const Offset lattice = GRID_SCALE(1.5, cfg.grid_item);
             Offset ac = {0};
 
-            if (gm.inner & GRID_MOVE_UP)    ac.y -= gcfg.curs_speed.y;
-            if (gm.inner & GRID_MOVE_RIGHT) ac.x += gcfg.curs_speed.x;
-            if (gm.inner & GRID_MOVE_LEFT)  ac.x -= gcfg.curs_speed.x;
-            if (gm.inner & GRID_MOVE_DOWN)  ac.y += gcfg.curs_speed.y;
+            if (gm.inner & GRID_MOVE_UP)    ac.y -= cfg.curs_speed.y;
+            if (gm.inner & GRID_MOVE_RIGHT) ac.x += cfg.curs_speed.x;
+            if (gm.inner & GRID_MOVE_LEFT)  ac.x -= cfg.curs_speed.x;
+            if (gm.inner & GRID_MOVE_DOWN)  ac.y += cfg.curs_speed.y;
 
             ac = (Offset)GRID_SCALE(GetFrameTime() * 60, ac);
             Cursor np = GRID_ADD(gr.vpointer, ac);
             np = (Cursor)GRID_ADD(np, lattice);
 
             gr.vpointer = (Cursor)GRID_ADD(gr.vpointer, ac);
-            Index cur_gi = grid_currentIndex(&gr);
+            Index cur_gi = grid_currentIndex(&gr, cfg.grid_item);
             if (cur_gi.x < 0) {
                 gr.vpointer.x = 0;
                 gr.vroot.x = (gr.vroot.x - 1 < 0) ? 0 : gr.vroot.x - 1;
@@ -87,11 +88,11 @@ int main(void) {
                 gr.vroot.y = (gr.vroot.y - 1 < 0) ? 0 : gr.vroot.y - 1;
             }
             if (cur_gi.x >= max.x) {
-                gr.vpointer.x = (max.x - 1) * gr.grid_items.x - gr.grid_pad;
+                gr.vpointer.x = (max.x - 1) * cfg.grid_item.x - cfg.grid_pad;
                 gr.vroot.x += 1;
             }
             if (cur_gi.y >= max.y) {
-                gr.vpointer.y = (max.y - 1) * gr.grid_items.y - gr.grid_pad;
+                gr.vpointer.y = (max.y - 1) * cfg.grid_item.y - cfg.grid_pad;
                 gr.vroot.y += 1;
             }
         }
@@ -102,10 +103,10 @@ int main(void) {
 
         BeginDrawing();
             ClearBackground(WHITE);
-            grid_render(&gr, screen, modal);
+            grid_render(&gr, screen, &cfg, modal);
 
             if (modal) {
-                Dimensions grid_dims = grid_subRectDims(gr.window, screen);
+                Dimensions grid_dims = grid_windowSize(gr.window, screen);
                 Rectangle modal_rect = {
                     .x = gr.window.top_left.x + ((grid_dims.x - modal_dim.x) / 2),
                     .y = gr.window.top_left.y + ((grid_dims.y - modal_dim.y) / 2),
