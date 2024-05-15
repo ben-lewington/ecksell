@@ -21,28 +21,28 @@ struct Mem {
 
 #define ARENA_MEM_FSTR "Memory { capacity: %ld, len: %ld, next?: %s }"
 #define ARENA_MEM_FMT(a) (a)->cap, (a)->len, ((a)->next != NULL) ? "true" : "false"
-
-#define arena_make(a, Type) arena_alloc((a), sizeof(Type))
+#define arena_new(a, Type) arena_alloc((a), sizeof(Type))
 
 typedef struct Arena Arena;
 struct Arena { Mem *start, *end; };
 
-Mem   *__arena_mem_new(size_t cap);
-void   __arena_mem_free(Mem *r);
+Mem  *__arena_mem_new(size_t cap);
+void  __arena_mem_free(Mem *r);
 
-void  *arena_alloc(Arena *a, size_t sz_bytes);
-void  *arena_realloc(Arena *a, void *cur, size_t cur_sz_bytes, size_t new_sz_bytes);
+void *arena_alloc(Arena *a, size_t sz_bytes);
+void *arena_realloc(Arena *a, void *cur, size_t cur_sz_bytes, size_t new_sz_bytes);
 
-void   arena_reset(Arena *a);
-void   arena_free(Arena *a);
+void  arena_reset(Arena *a);
+void  arena_free(Arena *a);
 
-int arena_snapshot(const Arena *a);
-size_t arena_rollback(Arena *a, int snapshot);
+int   arena_snapshot(const Arena *a);
+int   arena_rollback(Arena *a, int snapshot);
 
-void   arena_debug(const Arena *a);
+void  arena_debug(const Arena *a);
 
 #endif // !ARENA_H
-#define ARENA_IMPL
+
+// #define ARENA_IMPL
 #ifdef ARENA_IMPL
 
 Mem *__arena_mem_new(size_t cap) {
@@ -96,8 +96,7 @@ void *arena_realloc(Arena *a, void *cur, size_t cur_sz_bytes, size_t new_sz_byte
 }
 
 void arena_reset(Arena *a) {
-    for (Mem *m = a->start; m != NULL; m = m->next) m->len = 0;
-    a->end = a->start;
+    for (Mem *m = a->start; m != NULL; m = m->next) m->len = 0; a->end = a->start;
 }
 
 void arena_free(Arena *a) {
@@ -114,7 +113,7 @@ void arena_free(Arena *a) {
 int arena_snapshot(const Arena *a) {
     if (a->start == NULL) return -1;
     int ret = 0;
-    Mem *m = a->start;
+    const Mem *m = a->start;
     ret += m->len;
     while (m->next != NULL) {
         m = m->next;
@@ -123,29 +122,27 @@ int arena_snapshot(const Arena *a) {
     return ret;
 }
 
-size_t arena_rollback(Arena *a, int snapshot) {
+int arena_rollback(Arena *a, int snapshot) {
     if (snapshot < 0 || a->start == NULL) return -1;
-    size_t visited = 0;
+
     Mem *m = a->start;
-    size_t ml = m->len;
     while (m->next != NULL && snapshot >= 0) {
-        if (snapshot <= (int)ml) break;
+        int ml = m->len;
+        if (snapshot <= ml) break;
 
-        visited += ml;
         snapshot -= ml;
-
         m = m->next;
-        ml = m->len;
     }
-    size_t cleared = 0;
-    if (snapshot > 0) {
-        m->len = snapshot;
-        cleared = ml - snapshot;
-        while (m->next != NULL) {
-            cleared += m->len;
-            m->len = 0;
-            m = m->next;
-        }
+
+    if (snapshot <= 0) return 0;
+    int cleared = 0;
+
+    m->len = snapshot;
+    cleared = m->len - snapshot;
+    while (m->next != NULL) {
+        cleared += m->len;
+        m->len = 0;
+        m = m->next;
     }
     return cleared;
 }
