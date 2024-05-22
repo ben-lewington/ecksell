@@ -1,2 +1,7 @@
+zig-cache
+zig-out
 build/*
 !build/.gitkeep
+!build/rg_examples/
+build/rg_examples/*
+!build/rg_examples/.gitkeep
