@@ -1,8 +1,3 @@
-//  contains:
-//      - small associative array
-//      - dynamic arrays
-//      - logging
-//
 #ifndef ARRAY_H
 #define ARRAY_H
 
@@ -19,7 +14,7 @@ Array(String, char);
 
 // use libc malloc
 // #define INTO_ARENA
-#ifndef INTO_ARENA
+#ifdef LIBC_MALLOC
 
 #define ARRAY_DEFAULT_CAPACITY 256
 
@@ -78,5 +73,5 @@ Array(String, char);
 
 #define array_free(arr)
 
-#endif // !INTO_ARENA
+#endif // LIBC_MALLOC
 #endif // !ARRAY_H

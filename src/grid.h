@@ -11,31 +11,31 @@
 
 typedef struct { int inner; } GridMove;
 
-typedef struct {
-    int        grid_pad;
-    Dimensions grid_item;
-    Velocity   curs_speed;
-} AppCfg;
-
 typedef struct  {
     Index  vroot;
     Cursor vpointer;
     Window window;
 } GridRender;
 
-void       grid_render(const GridRender *gr, const Dimensions screen, const AppCfg *cfg, bool modal);
+#define GRID_RENDER_FMT_STR                        \
+    "{\n"                                          \
+    "    vroot = (" GRID_FMT_STRI "),\n"           \
+    "    vpointer = (" GRID_FMT_STRF "),\n"        \
+    "    window_top_left = (" GRID_FMT_STRF "),\n" \
+    "}"
 
-Dimensions grid_windowSize(Window sr, Dimensions screen);
-Index      grid_currentIndex(const GridRender *gr, const Dimensions grid_item);
-GridMove   grid_captureFrameKeys(void);
+#define GRID_RENDER_FMT(gr) \
+    GRID_PAIRS((gr)->vroot), GRID_PAIRS((gr)->vpointer), GRID_PAIRS((gr)->window.top_left)
+
+void      grid_render(const GridRender *gr, const AppCfg *cfg, const AppState *state);
+Index     grid_currentIndex(const GridRender *gr, const Dimensions grid_item);
+Rectangle grid_currentCell(const GridRender *gr, const Dimensions grid_item);
+Index     grid_getRenderSpan(const GridRender *gr, const AppCfg *cfg, const AppState *state);
+GridMove  grid_captureFrameKeys(void);
 
 #endif // !GRID_H
-// #define GRID_IMPL
+#define GRID_IMPL
 #ifdef GRID_IMPL
-Dimensions grid_windowSize(Window sr, Dimensions screen) {
-    Dimensions d = GRID_ADD(sr.top_left, sr.bottom_inset);
-    return (Dimensions) GRID_SUB(screen, d);
-}
 
 Index grid_currentIndex(const GridRender *gr, const Dimensions grid_item) {
     Offset lattice = GRID_SCALE(1.5, grid_item);
@@ -47,20 +47,34 @@ Index grid_currentIndex(const GridRender *gr, const Dimensions grid_item) {
     };
 }
 
-Index grid_getRenderSpan(const GridRender *gr, const Dimensions screen, const AppCfg *cfg) {
-    Dimensions grid = grid_windowSize(gr->window, screen);
+Rectangle grid_currentCell(const GridRender *gr, const Dimensions grid_item) {
+    Offset lattice = GRID_SCALE(1.5, grid_item);
+    Cursor lp = GRID_ADD(gr->vpointer, lattice);
+    Index lpi = GRID_DIV(lp, grid_item);
+    lp = (Cursor)GRID_MUL(lpi, grid_item);
+
+
+    return (Rectangle) {
+        .x = lp.x + gr->window.top_left.x,
+        .y = lp.y + gr->window.top_left.y,
+        .width = grid_item.x,
+        .height = grid_item.y,
+    };
+}
+
+Index grid_getRenderSpan(const GridRender *gr, const AppCfg *cfg, const AppState *state) {
+    Dimensions grid = window_dimensions(gr->window, state->screen);
     return (Index) {
         .x = (int)(grid.x / cfg->grid_item.x) - 1,
         .y = (int)(grid.y / cfg->grid_item.y) - 1,
     };
 }
 
-void grid_render(const GridRender *gr, const Dimensions screen, const AppCfg *cfg, bool modal) {
+void grid_render(const GridRender *gr, const AppCfg *cfg, const AppState *state) {
     Offset     lattice = GRID_SCALE(1.5, cfg->grid_item);
-    Index      max = grid_getRenderSpan(gr, screen, cfg);
-    Dimensions grid = grid_windowSize(gr->window, screen);
+    Index      max = grid_getRenderSpan(gr, cfg, state);
+    Dimensions grid = window_dimensions(gr->window, state->screen);
     DrawRectangleLines(GRID_PAIRS(gr->window.top_left), GRID_PAIRS(grid), BLACK);
-    DrawText(TextFormat("max: %d, %d", GRID_PAIRS(max)), 0, 30, 10, BLACK);
     int xi, yi;
     GRID_FOREACH(max) {
         Index it = {
@@ -75,17 +89,18 @@ void grid_render(const GridRender *gr, const Dimensions screen, const AppCfg *cf
         if (xi == 0 || yi == 0) {
             // rendering the current cell indicator
             if (xi == 0 && yi == 0) {
-                Cursor gpad = GRID_SHEAR(gr->window.top_left, cfg->grid_pad);
-                DrawText(TextFormat("%d, %d", GRID_PAIRS(gr->vroot)),
-                         GRID_PAIRS(gpad), 10, BLACK);
+                Cursor gpad = GRID_SHEAR(gr->window.top_left, cfg->pad);
+                Index cur_ix = GRID_ADD(grid_currentIndex(gr, cfg->grid_item), gr->vroot);
+                (state->write_text)(TextFormat("%d, %d", GRID_PAIRS(cur_ix)),
+                         GRID_CAST(gpad, Vector2), 10, 1, BLACK);
 
             }
             if (xi > 0)
-                DrawText(TextFormat("%d", gr->vroot.x + xi - 1),
-                        it_pos.x + cfg->grid_pad, gr->window.top_left.x + cfg->grid_pad, 10, BLACK);
+                (state->write_text)(TextFormat("%d", gr->vroot.x + xi - 1),
+                        (Vector2) GRID_NEW(it_pos.x + cfg->pad, gr->window.top_left.x + cfg->pad), 10, 1, BLACK);
             if (yi > 0)
-                DrawText(TextFormat("%d", gr->vroot.y + yi - 1),
-                        gr->window.top_left.y + cfg->grid_pad, it_pos.y + cfg->grid_pad, 10, BLACK);
+                (state->write_text)(TextFormat("%d", gr->vroot.y + yi - 1),
+                        (Vector2) GRID_NEW(gr->window.top_left.y + cfg->pad, it_pos.y + cfg->pad), 10, 1, BLACK);
         }
 
         if (xi == 0)
@@ -98,21 +113,20 @@ void grid_render(const GridRender *gr, const Dimensions screen, const AppCfg *cf
                    1, BLACK);
 
         Cursor lp = GRID_ADD(gr->vpointer, lattice);
-        DrawText(TextFormat("vpointer: (%f, %f), lattice: (%f, %f)",
-                    GRID_PAIRS(gr->vpointer), GRID_PAIRS(lp)), 0, 0, 10, BLACK);
         Index lpi = {
             .x = (int)(lp.x / cfg->grid_item.x) - 1,
             .y = (int)(lp.y / cfg->grid_item.y) - 1,
         };
-        DrawText(TextFormat("calc index: %d, %d", GRID_PAIRS(lpi)), 0, 20, 10, BLACK);
         Index gid = GRID_SHEAR(it, -1);
+        // TODO(BL): hoist the state logic up to the main event loop, have a grid_renderSelected
+        // function
         if (GRID_EQU(lpi, gid)) {
-            if (!modal) DrawRectangleLinesEx((Rectangle) {
+            if (state->mode == MODE_NORMAL) DrawRectangleLinesEx((Rectangle) {
                 .x = it_pos.x,
                 .y = it_pos.y,
                 .width = cfg->grid_item.x,
                 .height = cfg->grid_item.y,
-            }, cfg->grid_pad / 2., GREEN);
+            }, cfg->pad / 2., GREEN);
         }
     }
 

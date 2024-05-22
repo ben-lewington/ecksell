@@ -96,7 +96,9 @@ void *arena_realloc(Arena *a, void *cur, size_t cur_sz_bytes, size_t new_sz_byte
 }
 
 void arena_reset(Arena *a) {
-    for (Mem *m = a->start; m != NULL; m = m->next) m->len = 0; a->end = a->start;
+    for (Mem *m = a->start; m != NULL; m = m->next) {
+        m->len = 0; a->end = a->start;
+    }
 }
 
 void arena_free(Arena *a) {
