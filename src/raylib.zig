@@ -1,9 +1,13 @@
 const std = @import("std");
-pub const rl = @cImport({
-    @cInclude("raylib.h");
-    @cDefine("RAYGUI_IMPLEMENTATION", {});
-    @cInclude("raygui.h");
-});
+const rl = include();
+
+pub fn include() type {
+    return @cImport({
+        @cInclude("raylib.h");
+        @cDefine("RAYGUI_IMPLEMENTATION", {});
+        @cInclude("raygui.h");
+    });
+}
 
 pub const KeyboardKey = enum(c_int) {
     null = 0,
@@ -123,27 +127,31 @@ pub const KeyboardKey = enum(c_int) {
         return @intFromEnum(s);
     }
 
-    pub fn CaptureGroup(comptime S: type, comptime unique_keys: []const Self) type {
+    pub fn CaptureGroup(comptime S: type, comptime config: struct {
+        unique_keys: []const Self,
+        modifier: Self = .null,
+    }) type {
         const keys = @typeInfo(Self).Enum.fields;
+        // multiplier for the number of unique keys (2 if modifier else 1)
+        const mod: u8 = @as(u8, @intCast(@intFromBool(config.modifier != .null))) + 1;
+        const capture_key_len = config.unique_keys.len * mod;
+
         comptime {
             switch (@typeInfo(S)) {
                 .Enum => |ef| {
-                    if (ef.fields.len != unique_keys.len) @compileError("provided enum does not match the length of the keys");
+                    if (ef.fields.len != capture_key_len) {
+                        @compileError("provided enum does not match the length of the keys");
+                    }
                 },
                 else => {
                     const loc = @src();
-                    @compileError(std.fmt.comptimePrint("{s}:{d}:{d}: in `{s}` expected enum.", .{
-                        loc.file,
-                        loc.line,
-                        loc.column,
-                        loc.fn_name,
-                    }));
+                    @compileError(std.fmt.comptimePrint("{s}:{d}:{d}: in `{s}` expected enum.", .{ loc.file, loc.line, loc.column, loc.fn_name }));
                 },
             }
-            if (unique_keys.len > keys.len) @compileError("must be a unique set of keys");
-            for (unique_keys, 0..) |uq, i| {
-                for (i + 1..unique_keys.len) |j| {
-                    if (uq == unique_keys[j]) @compileError("must be a unique set of keys");
+            if (config.unique_keys.len > keys.len) @compileError("must be a unique set of keys");
+            for (config.unique_keys, 0..) |uq, i| {
+                for (i + 1..config.unique_keys.len) |j| {
+                    if (uq == config.unique_keys[j]) @compileError("must be a unique set of keys");
                 }
             }
         }
@@ -152,9 +160,17 @@ pub const KeyboardKey = enum(c_int) {
 
             pub fn getFrameKeys() @This() {
                 var ret: u128 = 0;
-                inline for (unique_keys, 0..) |uq, key_ix| {
+                inline for (0..capture_key_len) |key_ix| {
+                    const ix = @divFloor(key_ix, mod);
+                    const uq = config.unique_keys[ix];
                     if (rl.IsKeyPressed(uq.literally()) or rl.IsKeyDown(uq.literally())) {
-                        ret |= (1 << key_ix);
+                        if (mod > 1 and (rl.IsKeyPressed(config.modifier.literally()) or
+                            rl.IsKeyDown(config.modifier.literally())))
+                        {
+                            ret |= (1 << ix * mod + 1);
+                        } else {
+                            ret |= (1 << ix * mod);
+                        }
                     }
                 }
                 return .{ .inner = ret };

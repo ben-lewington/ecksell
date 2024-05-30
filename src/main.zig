@@ -1,82 +1,106 @@
 const std = @import("std");
 
-pub const rl = @cImport({
-    @cInclude("raylib.h");
-    @cDefine("RAYGUI_IMPLEMENTATION", {});
-    @cInclude("raygui.h");
-});
+const raylib = @import("raylib.zig");
+const rl = raylib.include();
 
 const app = @import("app.zig");
-const Grid = @import("grid.zig");
-const keys = @import("keys.zig");
-const Key = keys.KeyboardKey;
+const grid = @import("grid.zig");
+const Storage = @import("Storage.zig");
 
-const Coord = Grid.Coord;
+const Coord = grid.Coord;
+const Key = raylib.KeyboardKey;
+const Rect = grid.area.Rect;
+const @"0" = std.mem.zeroes;
+const IxStr = grid.AlphabetIx("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+// const IxStr = Grid.IndexStr("AB");
 
-pub const std_options = .{
-    .log_level = .info,
-};
+pub const std_options = .{ .log_level = .info };
 
 var state: app.State = .{
     .mode = .normal,
     .screen = undefined,
+    .current_input = @"0"(Rect(f32)),
 };
 
 var cfg: app.Config = .{
-    .pad = 5,
-    .grid_item = .{
-        .x = 50.0,
-        .y = 20.0,
-    },
-    .modal_dim = .{
-        .x = 50.0,
-        .y = 20.0,
-    },
-    .curs_velocity = .{
-        .x = 6.0,
-        .y = 4.0,
-    },
+    .pad = 2,
+    .grid_item = .{ .x = 50.0, .y = 20.0 },
+    .modal_dim = .{ .x = 50.0, .y = 20.0 },
+    .curs_velocity = .{ .x = 6.0, .y = 4.0 },
 };
 
 pub fn main() !void {
-    const grid_screen: app.ScreenView = .{
-        .top_left = .{ .x = 50, .y = 50 },
-        .bottom_inset = .{ .x = 25, .y = 25 },
-    };
+    std.log.info("\n", .{});
 
-    var gview: Grid.View = .{
-        .inner = .{
-            .virt_offset = .{ .x = 0, .y = 0 },
-            .virt_root = .{ .x = 0, .y = 0 },
-        },
+    const Dir = enum { up, down, left, right };
+    const GridRect = grid.Render;
+
+    var grid_state: GridRect = .{
+        .position = @"0"(GridRect.Pos),
         .grid_item = cfg.grid_item,
-        .window = .{ .x = 0, .y = 0, .width = 0, .height = 0 },
+        .window = @"0"(Rect(f32)),
     };
-    var alc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer _ = alc.reset(.free_all);
 
-    var input = std.ArrayList(u8).init(alc.allocator());
+    // "big" chunks of memory
+    const page_alc = std.heap.page_allocator;
 
-    rl.SetConfigFlags(rl.FLAG_WINDOW_RESIZABLE);
+    // General purpose arena.
+    var arena = std.heap.ArenaAllocator.init(page_alc);
+    defer _ = arena.reset(.free_all);
+
+    // user input arena.
+    var input = std.ArrayList(u8).init(arena.allocator());
+    try input.ensureTotalCapacity(50);
+
+    var storage: Storage = .{
+        .store = .{
+            .cells = try std.ArrayList(grid.Cell(Storage.Field.Value)).initCapacity(arena.allocator(), 1),
+            .text = std.ArrayList(u8).init(arena.allocator()),
+            .reals = std.ArrayList(f32).init(page_alc),
+            .indices = std.ArrayList(usize).init(page_alc),
+            .integers = std.ArrayList(isize).init(page_alc),
+        },
+        .boundary = .{
+            .top_left = @"0"(Coord(isize)),
+            .bottom_right = @"0"(Coord(isize)),
+        },
+        .regions = std.ArrayList(Storage.Heap.Region.Value).init(arena.allocator()),
+    };
+    // rl.SetConfigFlags(rl.FLAG_WINDOW_RESIZABLE | rl.FLAG_WINDOW_MAXIMIZED);
     rl.InitWindow(800, 600, "ZL Sheets");
+    rl.GuiSetFont(rl.LoadFontEx("./resources/fonts/homespun.ttf", 10, null, 0));
     rl.SetTargetFPS(30);
     rl.SetExitKey(Key.end.literally());
 
     var dt: f32 = 0;
+    var current_cell: ?Storage.Field.Value = null;
     while (!rl.WindowShouldClose()) {
         state.screen = .{
             .x = @floatFromInt(rl.GetScreenWidth()),
             .y = @floatFromInt(rl.GetScreenHeight()),
         };
 
-        gview.window = grid_screen.toRect(state.screen);
+        grid_state.window = .{
+            .x = 5,
+            .y = 5,
+            .width = state.screen.x - 5 - 4,
+            .height = state.screen.y - cfg.grid_item.y - 5 - 4,
+        };
 
-        std.log.debug("{}", .{gview});
+        const cur = grid_state.currentCell();
+        const cursor_ix = grid_state.currentCursorIndex();
+        const grid_ix = Coord(isize).binop(.add, cursor_ix, grid_state.position.root);
+        current_cell = storage.getValueAt(grid_ix);
 
-        switch (state.mode) {
+        if (state.mode.shouldTransition()) |mode| {
+            state.mode = mode;
+            input.items.len = 0;
+        } else switch (state.mode) {
             .normal => {
-                const Dir = enum { up, down, left, right };
-                const grid_move = Key.CaptureGroup(Dir, &[_]Key{ .k, .j, .h, .l }).getFrameKeys();
+                const grid_move = Key.CaptureGroup(Dir, .{
+                    .unique_keys = &[_]Key{ .k, .j, .h, .l },
+                    .modifier = .null,
+                }).getFrameKeys();
 
                 var ac: Coord(f32) = .{ .x = 0, .y = 0 };
 
@@ -85,49 +109,44 @@ pub fn main() !void {
                 if (grid_move.isKeySet(.left)) ac.x -= cfg.curs_velocity.x;
                 if (grid_move.isKeySet(.right)) ac.x += cfg.curs_velocity.x;
 
-                const ft = 60 * rl.GetFrameTime();
-                ac = .{
-                    .x = ft * ac.x,
-                    .y = ft * ac.y,
-                };
+                ac.ibinop(.mul, Coord(f32).shear(60 * rl.GetFrameTime()));
 
-                std.log.debug("offset {}", .{ac});
-                gview.moveCursor(ac, cfg.pad);
-                std.log.debug("total offset {}", .{gview.inner.virt_offset});
+                grid_state.moveCursor(ac, cfg.pad);
             },
-            .insert => {
+            .insert, .find => {
                 var key = rl.GetCharPressed();
                 while (key > 0) {
                     if (key >= 32 and key <= 125) try input.append(@intCast(key));
                     key = rl.GetCharPressed();
                 }
                 if (input.items.len > 0) {
-                    if (rl.IsKeyDown(@intFromEnum(Key.backspace))) {
+                    const break_insert = Key.CaptureGroup(Dir, .{
+                        .unique_keys = &[_]Key{ .enter, .tab },
+                        .modifier = .left_shift,
+                    }).getFrameKeys();
+
+                    if (break_insert.inner > 0) {
+                        _ = storage.storeValueAt(grid_ix, input.items);
+
+                        var thr = std.mem.zeroes(Coord(isize));
+                        if (break_insert.isKeySet(.up)) thr.y += 1;
+                        if (break_insert.isKeySet(.down)) thr.y -= 1;
+                        if (break_insert.isKeySet(.left)) thr.x += 1;
+                        if (break_insert.isKeySet(.right)) thr.x -= 1;
+
+                        grid_state.position.offset = Coord(f32)
+                            .binopChain(.add, thr, cursor_ix)
+                            .then(.mul, cfg.grid_item)
+                            .finally(.add, grid_state.window);
+
+                        state.mode = .normal;
+                    } else if (rl.IsKeyDown(Key.backspace.literally())) {
                         if (dt >= 0.08) {
                             input.items.len = input.items.len - 1;
                             dt = 0;
                         }
                         dt += rl.GetFrameTime();
-                    } else if (rl.IsKeyPressed(@intFromEnum(Key.backspace))) {
-                        input.items.len = input.items.len - 1;
-                        dt = 0;
-                    }
-                }
-            },
-            .find => {
-                var key = rl.GetCharPressed();
-                while (key > 0) {
-                    if (key >= 32 and key <= 125) try input.append(@intCast(key));
-                    key = rl.GetCharPressed();
-                }
-                if (input.items.len > 0) {
-                    if (rl.IsKeyDown(@intFromEnum(Key.backspace))) {
-                        if (dt >= 0.08) {
-                            input.items.len = input.items.len - 1;
-                            dt = 0;
-                        }
-                        dt += rl.GetFrameTime();
-                    } else if (rl.IsKeyPressed(@intFromEnum(Key.backspace))) {
+                    } else if (rl.IsKeyPressed(Key.backspace.literally())) {
                         input.items.len = input.items.len - 1;
                         dt = 0;
                     }
@@ -135,66 +154,129 @@ pub fn main() !void {
             },
         }
 
-        const tr_keys: [3]Key = app.Mode.mode_key_transitions[@intFromEnum(state.mode)];
-        for (tr_keys, 0..) |k, i| {
-            if (rl.IsKeyPressed(@intFromEnum(k)) or rl.IsKeyDown(@intFromEnum(k))) state.mode = @enumFromInt(i);
-        }
+        std.log.debug("{}", .{storage.store});
 
         rl.BeginDrawing();
         rl.ClearBackground(rl.WHITE);
-        var it = gview.iter();
-        rl.GuiDrawRectangle(gview.window, 1, rl.BLUE, rl.WHITE);
-        const cursor_ix = gview.currentCursorIndex();
-        const cursor_grid_ix = Coord(isize).binop(.add, cursor_ix, gview.inner.virt_root);
+        rl.GuiDrawRectangle(grid_state.window.as(), 1, rl.BLACK, rl.WHITE);
+        // _ = rl.GuiStatusBar(.{ .x = 0, .y = 0, .width = state.screen.x, .height = 20 }, "Hello");
+        var it = grid_state.iter();
         while (it.next()) |grid_cell| {
             const ix = grid_cell.ix;
             const rect = grid_cell.rect;
+
+            const rc = Coord(isize)
+                .binopChain(.add, ix, grid_state.position.root)
+                .finally(.sub, Coord(isize).shear(1));
+
             if (ix.x == 0 or ix.y == 0) {
                 if (ix.x == 0 and ix.y == 0) {
-                    rl.GuiDrawText(
-                        rl.TextFormat("%d, %d", cursor_grid_ix.x, cursor_grid_ix.y),
-                        rect,
-                        rl.TEXT_ALIGN_CENTER,
-                        rl.BLACK,
-                    );
-                }
-
-                const rc = Coord(isize).binop(.add, ix, gview.inner.virt_root);
-                if (ix.x > 0)
-                    rl.GuiDrawText(rl.TextFormat("%d", rc.x), rect, rl.TEXT_ALIGN_CENTER, rl.BLACK);
-                if (ix.y > 0)
-                    rl.GuiDrawText(rl.TextFormat("%d", rc.y), rect, rl.TEXT_ALIGN_CENTER, rl.BLACK);
-
-                if (ix.x == 0) {
-                    rl.DrawLineEx(
-                        .{ .x = gview.window.x, .y = rect.y + rect.height },
-                        .{ .x = gview.window.x + gview.window.width, .y = rect.y + rect.height },
+                    rl.GuiDrawRectangle(
+                        .{
+                            .x = grid_state.window.x,
+                            .y = grid_state.window.y,
+                            .width = cfg.grid_item.x,
+                            .height = grid_state.window.height,
+                        },
                         1,
                         rl.BLACK,
+                        rl.Fade(rl.SKYBLUE, 0.2),
                     );
+                    rl.GuiDrawRectangle(
+                        .{
+                            .x = grid_state.window.x,
+                            .y = grid_state.window.y,
+                            .width = grid_state.window.width,
+                            .height = cfg.grid_item.y,
+                        },
+                        1,
+                        rl.BLACK,
+                        rl.Fade(rl.SKYBLUE, 0.2),
+                    );
+                    const cur_col = IxStr.convert(if (grid_ix.x < 0) 0 else @as(usize, @intCast(grid_ix.x)));
+                    rl.GuiDrawText(rl.TextFormat("%.*s%d", cur_col.len, cur_col.buf[0..cur_col.len].ptr, grid_ix.y), rect.as(), rl.TEXT_ALIGN_CENTER, rl.BLACK);
+                }
+
+                const col = IxStr.convert(if (rc.x < 0) 0 else @as(usize, @intCast(rc.x)));
+                if (ix.x > 0) rl.GuiDrawText(rl.TextFormat("%.*s", col.len, col.buf[0..col.len].ptr), rect.as(), rl.TEXT_ALIGN_CENTER, rl.BLACK);
+                if (ix.y > 0) rl.GuiDrawText(rl.TextFormat("%d", rc.y), rect.as(), rl.TEXT_ALIGN_CENTER, rl.BLACK);
+
+                if (ix.x == 0) {
+                    rl.DrawLineEx(.{ .x = grid_state.window.x, .y = rect.y + rect.height }, .{
+                        .x = grid_state.window.x + grid_state.window.width,
+                        .y = rect.y + rect.height,
+                    }, 1, rl.BLACK);
                 }
 
                 if (ix.y == 0) {
-                    rl.DrawLineEx(
-                        .{ .x = rect.x + rect.width, .y = gview.window.y },
-                        .{ .x = rect.x + rect.width, .y = gview.window.y + gview.window.height },
-                        1,
-                        rl.BLACK,
+                    rl.DrawLineEx(.{ .x = rect.x + rect.width, .y = grid_state.window.y }, .{
+                        .x = rect.x + rect.width,
+                        .y = grid_state.window.y + grid_state.window.height,
+                    }, 1, rl.BLACK);
+                }
+            } else if (storage.hasData()) {
+                if (storage.getValueAt(rc)) |v| {
+                    if (!Coord(isize).equ(ix, Coord(isize).binop(
+                        .add,
+                        cursor_ix,
+                        Coord(isize).shear(1),
+                    )) or state.mode != .insert) {
+                        rl.GuiDrawText(storage.guiTextFormat(v), rect.as(), rl.TEXT_ALIGN_CENTER, rl.BLACK);
+                    }
+                    rl.DrawRectangleRec(
+                        .{ .x = rect.x + 0.5, .y = rect.y + 0.5, .width = 1, .height = 10 },
+                        // 2,
+                        Storage.Field.pallette[@intFromEnum(v)],
                     );
                 }
             }
         }
 
-        rl.DrawRectangleRec(.{ .x = 50, .y = 10, .width = 75, .height = 25 }, app.Mode.pallette[@intFromEnum(state.mode)]);
-        rl.GuiDrawText(@constCast(@ptrCast(@tagName(state.mode))), .{ .x = 50, .y = 10, .width = 75, .height = 25 }, 1, rl.BLACK);
+        const mode_lbl = .{
+            .x = grid_state.window.x,
+            .y = grid_state.window.y + grid_state.window.height - 1,
+            .width = cfg.grid_item.x,
+            .height = cfg.grid_item.y,
+        };
+        const input_bar = .{
+            .x = grid_state.window.x + cfg.grid_item.x - 1,
+            .y = grid_state.window.y + grid_state.window.height - 1,
+            .width = grid_state.window.width - cfg.grid_item.x + 1,
+            .height = cfg.grid_item.y,
+        };
+        rl.GuiDrawRectangle(mode_lbl, 1, rl.BLACK, app.Mode.pallette[@intFromEnum(state.mode)]);
+
+        _ = rl.GuiDrawText(@constCast(@ptrCast(@tagName(state.mode))), mode_lbl, 1, rl.BLACK);
+        rl.GuiDrawRectangle(input_bar, 1, rl.BLACK, rl.WHITE);
 
         switch (state.mode) {
             .normal => {
-                const cur = gview.currentCell();
-                const p: f32 = cfg.pad;
-                rl.DrawRectangleLinesEx(cur, p / 2.0, rl.GREEN);
+                rl.DrawRectangleLinesEx(.{
+                    .x = cur.x,
+                    .y = cur.y,
+                    .width = cur.width - 0.5,
+                    .height = cur.height - 0.5,
+                }, 2, rl.GREEN);
+
+                if (current_cell) |c| {
+                    rl.GuiDrawText(storage.guiTextFormat(c), input_bar, 1, rl.BLACK);
+                }
             },
-            .insert => {},
+            .insert => {
+                rl.DrawRectangleLinesEx(.{
+                    .x = cur.x,
+                    .y = cur.y,
+                    .width = cur.width - 0.5,
+                    .height = cur.height - 0.5,
+                }, 2, rl.GREEN);
+
+                // try input.append();
+                if (input.items.len > 0) {
+                    const s = rl.TextFormat("%.*s", input.items.len, input.items.ptr);
+                    rl.GuiDrawText(s, cur.as(), 1, rl.BLACK);
+                    rl.GuiDrawText(s, input_bar, 1, rl.BLACK);
+                }
+            },
             .find => {
                 // const modal_topleft = {
                 //     .x = gr.window.top_left.x + ((grid_dims.x - modal_dim.x) / 2),
