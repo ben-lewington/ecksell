@@ -23,28 +23,25 @@ int main(void) {
 
     Arena alc = {0};
 
-    Dimensions screen;
+    float pad = 5;
+
     Input input = {
-        .window = {
-            .top_left = {
-                .x = 100,
-                .y = 100,
-            },
-            .width = 150,
-            .font_size = 30,
-            .spacing = 1,
-            .pad = 5,
-        },
+        .font_size = 30,
+        .font_spacing = 1,
         .text = {0},
     };
+
+    Rectangle boundary = {
+        .x      = 100,
+        .y      = 100,
+        .width  = 100,
+        .height = 30,
+    };
+
+
     // this could be a dynamic array of timedeltas if needed
     float dt = 0;
     while (!WindowShouldClose()) {
-        screen = (Dimensions) {
-            .x = GetScreenWidth(),
-            .y = GetScreenHeight()
-        };
-
 
         BeginDrawing();
             DrawText(TextFormat("capture_mode: %s", (capture_text) ? "true" : "false"),
@@ -75,7 +72,19 @@ int main(void) {
                     dt = 0;
                 }
             }
-            input_render(&input, screen);
+
+            // draw the bounding rectangle
+            DrawRectangleRec(boundary, BLUE);
+
+            Rectangle iboundary = {
+                .x      = boundary.x + pad,
+                .y      = boundary.y + pad,
+                .width  = boundary.width - 2 * pad,
+                .height = boundary.height - 2 * pad,
+            };
+
+            input_renderInto(&input, iboundary);
+
         EndDrawing();
 
         if (IsKeyPressed(KEY_TAB)) capture_text = !capture_text;
